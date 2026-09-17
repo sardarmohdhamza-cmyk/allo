@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Photo Booth — Spatial AR & Desktop Widgets</title>
+
+  <style>
+    :root {
+      --font-sf: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
+      --font-mono: "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+      /* Pastel Palette */
+      --pastel-pink: #ffb7b2;
+      --pastel-lavender: #e2f0cb;
+      --pastel-mint: #b5ead7;
+      --pastel-peach: #ffdac1;
+      --pastel-sky: #c7ceea;
+      --pastel-rose: #ff9aa2;
+      --pastel-purple: #d6a2e8;
+
+      /* Glassmorphism */
+      --glass-bg: rgba(255, 255, 255, 0.45);
+      --glass-dark: rgba(20, 20, 25, 0.55);
+      --glass-border: rgba(255, 255, 255, 0.65);
+      --glass-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+
+      /* Messaging App Colors */
+      --text-main: #1c1c1e;
+      --text-muted: #8e8e93;
+      --blue-bubble: #007AFF;
+      --gray-bubble: #E9E9EB;
+    }
+
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    body, html {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      font-family: var(--font-sf);
+      background: linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 50%, #c2e9fb 100%);
+      background-size: 400% 400%;
+      animation: gradientBG 20s ease infinite;
+    }
+
+    @keyframes gradientBG {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    /* Floating Animation for Windows & Widgets */
+    @keyframes float {
+      0% { transform: translateY(0px); }
+      50% { transform: translateY(-8px); }
+      100% { transform: translateY(0px); }
+    }
+
+    /* macOS Menu Bar */
+    .menubar {
+      height: 30px;
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(25px) saturate(190%);
+      -webkit-backdrop-filter: blur(25px) saturate(190%);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #1d1d1f;
+      z-index: 9999;
+      position: relative;
+    }
+
+    .menubar-left, .menubar-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    /* Main App Workspace (Centers the PhotoBooth) */
+    .app-workspace {
+      height: calc(100vh - 30px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .photobooth-window {
+      width: 100%;
+      max-width: 1100px;
+      height: 100%;
+      max-height: 700px;
+      background: rgba(255, 255, 255, 0.25);
+      backdrop-filter: blur(40px) saturate(200%);
+      -webkit-backdrop-filter: blur(40px) saturate(200%);
+      border-radius: 20px;
+      border: 1px solid var(--glass-border);
+      box-shadow: var(--glass-shadow);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Camera Viewport */
+    .viewport {
+      flex: 1;
+      position: relative;
+      background: #0d0d11;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    video { display: none; }
+    canvas#mainCanvas { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+    /* Bottom Dock */
+    .dock-wrapper {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 400;
+    }
+    .dock {
+      background: rgba(255, 255, 255, 0.45);
+      backdrop-filter: blur(35px) saturate(200%);
+      border: 1px solid rgba(255, 255, 255, 0.7);
+      border-radius: 26px;
+      padding: 8px 14px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: min(92vw, 620px);
+      gap: 10px;
+      box-shadow: 0 15px 35px rgba(0, 0, 0, 0.18);
+    }
+    .dock-btn {
+      min-width: 54px; height: 48px; border-radius: 14px;
+      background: rgba(255, 255, 255, 0.6);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.2s; padding: 0 8px; color: #2c2c2e;
+    }
+    .dock-btn.active { background: linear-gradient(135deg, var(--pastel-pink), var(--pastel-purple)); color: #fff; }
+    .dock-icon { font-size: 16px; }
+    .dock-label { font-size: 9px; font-weight: 600; white-space: nowrap; }
+    .dock-divider { width: 1px; align-self: stretch; margin: 4px 2px; background: rgba(0, 0, 0, 0.12); }
+
+    /* --- DRAGGABLE WINDOWS & WIDGETS --- */
+    .draggable-item {
+      position: absolute;
+      background: rgba(255, 255, 255, 0.65);
+      backdrop-filter: blur(30px) saturate(180%);
+      -webkit-backdrop-filter: blur(30px) saturate(180%);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      box-shadow: var(--glass-shadow);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: float 6s ease-in-out infinite;
+    }
+    .draggable-item:nth-child(even) { animation-delay: -3s; }
+
+    /* Window Header (Common for Messages) */
+    .window-header {
+      height: 44px;
+      background: rgba(255, 255, 255, 0.4);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.4);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      position: relative;
+      cursor: grab;
+    }
+    .window-header:active { cursor: grabbing; }
+
+    .traffic-lights { display: flex; gap: 8px; position: absolute; left: 16px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 2px rgba(0,0,0,0.2); }
+    .dot.red { background: #FF5F56; border: 0.5px solid #E0443E; }
+    .dot.yellow { background: #FFBD2E; border: 0.5px solid #DEA123; }
+    .dot.green { background: #27C93F; border: 0.5px solid #1AAB29; }
+    .window-title { flex: 1; text-align: center; font-size: 14px; font-weight: 600; color: var(--text-main); }
+
+    /* Chat Body */
+    .window-body { flex: 1; padding: 15px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+    .bubble { max-width: 80%; padding: 10px 14px; border-radius: 18px; font-size: 13px; line-height: 1.4; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+    .bubble.received { background: var(--gray-bubble); color: #000; align-self: flex-start; border-bottom-left-radius: 4px; }
+    .bubble.sent { background: var(--blue-bubble); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+    .timestamp { font-size: 10px; color: var(--text-muted); align-self: center; margin-bottom: 2px; }
+
+    /* Specific Window Sizes */
+    #window-hubby { width: 320px; height: 260px; top: 12%; left: 5%; z-index: 10; }
+    #window-love { width: 280px; height: 380px; top: 15%; right: 5%; z-index: 11; }
+    #window-darling { width: 300px; height: 250px; bottom: 8%; left: 10%; z-index: 12; }
+
+    /* --- NEW DESKTOP WIDGETS --- */
+
+    /* 1. Spotify Widget */
+    #widget-spotify {
+      width: 260px; height: 110px; top: 8%; right: 28%; z-index: 15;
+      background: rgba(30, 30, 30, 0.75); color: white; flex-direction: row; align-items: center; padding: 15px; gap: 15px; cursor: grab;
+    }
+    .spotify-art { width: 75px; height: 75px; border-radius: 10px; background: linear-gradient(135deg, #1DB954, #191414); box-shadow: 0 4px 10px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; font-size: 30px; }
+    .spotify-info { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .sp-title { font-size: 14px; font-weight: 700; }
+    .sp-artist { font-size: 12px; color: #b3b3b3; }
+    .sp-progress { width: 100%; height: 4px; background: #535353; border-radius: 2px; margin-top: 8px; position: relative; }
+    .sp-progress-fill { width: 45%; height: 100%; background: #1DB954; border-radius: 2px; }
+
+    /* 2. Weather Widget */
+    #widget-weather {
+      width: 150px; height: 150px; top: 10%; left: 28%; z-index: 14; cursor: grab;
+      background: linear-gradient(180deg, #4A90E2 0%, #50E3C2 100%);
+      color: white; padding: 15px; justify-content: space-between;
+    }
+    .w-top { font-size: 16px; font-weight: 600; }
+    .w-temp { font-size: 42px; font-weight: 300; line-height: 1; }
+    .w-desc { font-size: 12px; font-weight: 500; opacity: 0.9; }
+
+    /* 3. Clock Widget */
+    #widget-clock {
+      width: 150px; height: 150px; bottom: 10%; right: 10%; z-index: 13; cursor: grab;
+      border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      background: rgba(255, 255, 255, 0.5); border: 2px solid rgba(255,255,255,0.8);
+    }
+    .clock-face { position: relative; width: 130px; height: 130px; border-radius: 50%; background: #fff; box-shadow: inset 0 2px 5px rgba(0,0,0,0.1); }
+    .hand { position: absolute; bottom: 50%; left: 50%; transform-origin: bottom; background: #000; border-radius: 4px; transform: translateX(-50%); }
+    .hour-hand { width: 4px; height: 35px; background: #333; }
+    .minute-hand { width: 3px; height: 50px; background: #666; }
+    .second-hand { width: 2px; height: 55px; background: #FF3B30; }
+    .center-dot { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; background: #FF3B30; border-radius: 50%; transform: translate(-50%, -50%); border: 2px solid #fff; }
+
+    /* --- GESTURE WORD GAME (decorative, not yet wired up) --- */
+    .word-slot {
+      font-size: 12px; font-weight: 700; padding: 5px 10px; border-radius: 999px;
+      color: rgba(60,50,70,0.35); background: rgba(255,255,255,0.35);
+      transition: all 0.35s ease; letter-spacing: 0.3px;
+    }
+    .word-slot.unlocked {
+      color: #fff; background: linear-gradient(135deg, var(--pastel-rose), var(--pastel-purple));
+      box-shadow: 0 4px 12px rgba(214,162,232,0.5);
+      transform: scale(1.08);
+    }
+    .gesture-guide {
+      position: absolute; top: 14px; left: 14px; z-index: 500; width: 190px;
+      padding: 10px 12px; border-radius: 16px; font-size: 10.5px; line-height: 1.7;
+      color: rgba(40,30,50,0.8); background: rgba(255,255,255,0.4);
+      backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+      border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow);
+    }
+    .gesture-guide b { display:block; font-size: 11.5px; margin-bottom: 4px; color: rgba(30,20,40,0.95); }
+    .floating-word {
+      position: absolute; pointer-events: none; z-index: 600;
+      font-size: 34px; font-weight: 800; color: #fff;
+      text-shadow: 0 0 14px rgba(255,120,180,0.9), 0 4px 10px rgba(0,0,0,0.25);
+      animation: wordPop 1.1s ease-out forwards;
+      font-family: var(--font-sf);
+    }
+    @keyframes wordPop {
+      0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.4); }
+      20%  { opacity: 1; transform: translate(-50%,-50%) scale(1.15); }
+      70%  { opacity: 1; transform: translate(-50%,-60%) scale(1); }
+      100% { opacity: 0; transform: translate(-50%,-90%) scale(0.9); }
+    }
+    .finale-card {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      z-index: 700; padding: 26px 34px; border-radius: 26px; text-align: center;
+      background: linear-gradient(135deg, var(--pastel-pink), var(--pastel-purple));
+      box-shadow: 0 30px 60px rgba(0,0,0,0.3); color: #fff;
+      font-size: 22px; font-weight: 800; letter-spacing: 0.4px;
+      animation: wordPop 3.2s ease-out forwards;
+    }
+
+    /* 4. Side Sketch */
+    .aesthetic-sketch {
+      position: absolute;
+      bottom: 20%;
+      left: 2%;
+      width: 200px;
+      opacity: 0.6;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    /* --- AR HUD: camera status + active filter readout --- */
+    .ar-hud {
+      position: absolute; top: 14px; right: 14px; z-index: 500; min-width: 150px;
+      padding: 10px 14px; border-radius: 16px;
+      background: rgba(20, 20, 25, 0.55);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff; font-family: var(--font-mono); font-size: 10.5px; line-height: 1.7;
+    }
+    .hud-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .hud-dot { width: 7px; height: 7px; border-radius: 50%; background: #ff5f56; box-shadow: 0 0 6px #ff5f56; flex-shrink: 0; transition: all 0.2s; }
+    .hud-dot.on { background: #39ff14; box-shadow: 0 0 6px #39ff14; }
+    .hud-sub { color: rgba(255,255,255,0.6); font-size: 9.5px; }
+
+    /* --- Camera permission gate --- */
+    .gate-screen {
+      position: absolute; inset: 0; z-index: 900;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(10, 10, 14, 0.55);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      transition: opacity 0.3s ease;
+    }
+    .gate-screen.hidden { opacity: 0; pointer-events: none; }
+    .gate-card {
+      width: min(320px, 82%); padding: 28px 26px; border-radius: 22px; text-align: center;
+      background: var(--glass-bg); backdrop-filter: blur(30px) saturate(180%);
+      -webkit-backdrop-filter: blur(30px) saturate(180%);
+      border: 1px solid var(--glass-border); box-shadow: var(--glass-shadow);
+    }
+    .gate-card h2 { font-size: 18px; color: var(--text-main); margin-bottom: 8px; }
+    .gate-card p { font-size: 12.5px; color: var(--text-muted); line-height: 1.55; margin-bottom: 18px; }
+    .cta-btn {
+      border: none; cursor: pointer; padding: 11px 28px; border-radius: 999px;
+      font-size: 13px; font-weight: 700; color: #fff; font-family: var(--font-sf);
+      background: linear-gradient(135deg, var(--pastel-pink), var(--pastel-purple));
+      box-shadow: 0 10px 24px rgba(214, 162, 232, 0.45);
+      transition: transform 0.15s ease;
+    }
+    .cta-btn:active { transform: scale(0.96); }
+    .cta-btn:disabled { opacity: 0.6; cursor: default; }
+    .error-box {
+      margin-top: 14px; padding: 8px 12px; border-radius: 10px; font-size: 11.5px;
+      background: rgba(255, 90, 90, 0.15); color: #b3261e; border: 1px solid rgba(255, 90, 90, 0.3);
+    }
+
+    /* --- Bottom gesture feedback message --- */
+    .hud-bottom {
+      position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%);
+      z-index: 400; max-width: 80%; text-align: center;
+      padding: 8px 16px; border-radius: 999px; font-size: 11.5px; font-weight: 600;
+      background: rgba(20, 20, 25, 0.5); color: #fff;
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Menu Bar -->
+  <div class="menubar">
+    <div class="menubar-left">
+      <span style="font-weight: 700;"> Photo Booth Workspace</span>
+      <span>File</span>
+      <span>Edit</span>
+      <span>Widgets</span>
+      <span>Help</span>
+    </div>
+    <div class="menubar-right">
+      <span>Gestures: pinch a finger to trigger a filter</span>
+      <span id="liveClockText">00:00 AM</span>
+    </div>
+  </div>
+
+  <!-- Decorative Sketch -->
+  <svg class="aesthetic-sketch" viewBox="0 0 200 300" fill="none" stroke="#333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M100,280 C100,200 70,180 80,120 C85,90 120,70 130,40" />
+    <path d="M80,120 C50,110 30,130 20,160 C15,180 40,200 60,190 C80,180 90,150 80,120 Z" />
+    <path d="M80,120 C110,130 140,110 160,90 C170,70 150,50 130,60 C110,70 95,95 80,120 Z" />
+    <path d="M100,200 C130,220 160,210 180,240 C190,260 170,280 150,270 C130,260 115,230 100,200 Z" />
+  </svg>
+
+  <!-- Photo Booth Canvas Container -->
+  <div class="app-workspace">
+    <div class="photobooth-window">
+      <!-- Window Title Bar -->
+      <div class="window-header" style="cursor: default;">
+        <div class="traffic-lights">
+          <div class="dot red"></div>
+          <div class="dot yellow"></div>
+          <div class="dot green"></div>
+        </div>
+        <div class="window-title">Spatial AR Hub</div>
+      </div>
+      <!-- Viewport -->
+      <div class="viewport">
+        <video id="webcam" playsinline muted></video>
+        <canvas id="mainCanvas"></canvas>
+
+        <div class="ar-hud" id="arHud">
+          <div class="hud-row"><span class="hud-dot" id="hudDot"></span><span id="statusVal">OFFLINE</span></div>
+          <div class="hud-row" id="portalTag">FILTER: THERMAL VISION</div>
+          <div class="hud-row hud-sub">HANDS <span id="handsVal">0</span> · FPS <span id="fpsVal">0</span></div>
+        </div>
+
+        <div class="gesture-guide">
+          <b>Filter gestures</b>
+          🤏 Thumb + Index — cycle filter<br>
+          🤏 Thumb + Middle — liquid morph<br>
+          🤏 Thumb + Ring — emoji burst<br>
+          🤏 Thumb + Pinky — bubble burst<br>
+          🖐️🖐️ Frame with both hands — open portal
+        </div>
+
+        <div class="gate-screen" id="gateScreen">
+          <div class="gate-card">
+            <h2>Turn on your camera</h2>
+            <p>Raise both hands into frame and pinch your fingers together to switch filters and trigger effects.</p>
+            <button class="cta-btn" id="startBtn">Enable Camera</button>
+            <div class="error-box" id="errorBox" style="display:none;"></div>
+          </div>
+        </div>
+
+        <div class="hud-bottom" id="hudMessage">Hold up both hands to open the spatial rectangle portal</div>
+
+        <div class="dock-wrapper">
+          <div class="dock" id="dock"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
+  <!-- DRAGGABLE DESKTOP WINDOWS & WIDGETS        -->
+  <!-- ========================================== -->
+
+  <!-- Message: Hubby -->
+  <div class="draggable-item" id="window-hubby">
+    <div class="window-header">
+      <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+      <div class="window-title">hubby 💍</div>
+    </div>
+    <div class="window-body">
+      <div class="timestamp">Today 9:41 AM</div>
+      <div class="bubble received">Good morning beautiful! Just thinking about you.</div>
+      <div class="bubble sent">Morning! Miss you already! Have a great day at work.</div>
+    </div>
+  </div>
+
+  <!-- Message: Love -->
+  <div class="draggable-item" id="window-love">
+    <div class="window-header">
+      <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+      <div class="window-title">love ❤️</div>
+    </div>
+    <div class="window-body">
+      <div class="timestamp">Yesterday 11:30 PM</div>
+      <div class="bubble received">Are you asleep yet?</div>
+      <div class="bubble sent">Just getting into bed, why?</div>
+      <div class="bubble received">Just wanted to say goodnight and that I love you so much.</div>
+      <div class="bubble sent">You're the sweetest. Goodnight! 🥰</div>
+    </div>
+  </div>
+
+  <!-- Message: Darling -->
+  <div class="draggable-item" id="window-darling">
+    <div class="window-header">
+      <div class="traffic-lights"><div class="dot red"></div><div class="dot yellow"></div><div class="dot green"></div></div>
+      <div class="window-title">darling 🌸</div>
+    </div>
+    <div class="window-body">
+      <div class="timestamp">Today 2:15 PM</div>
+      <div class="bubble received">You looked stunning today. Leaving this for you to find!</div>
+      <div class="bubble sent">Stop it, you're making me blush!!</div>
+    </div>
+  </div>
+
+  <!-- Widget: Spotify -->
+  <div class="draggable-item" id="widget-spotify">
+    <div class="spotify-art">🎵</div>
+    <div class="spotify-info">
+      <div class="sp-title">Cruel Summer</div>
+      <div class="sp-artist">Taylor Swift</div>
+      <div class="sp-progress"><div class="sp-progress-fill"></div></div>
+    </div>
+  </div>
+
+  <!-- Widget: Weather -->
+  <div class="draggable-item" id="widget-weather">
+    <div class="w-top">Cupertino</div>
+    <div class="w-temp">72°</div>
+    <div class="w-desc">☀️ Sunny<br>H:78° L:55°</div>
+  </div>
+
+  <!-- Widget: Clock -->
+  <div class="draggable-item" id="widget-clock">
+    <div class="clock-face">
+      <div class="hand hour-hand" id="hr-hand"></div>
+      <div class="hand minute-hand" id="min-hand"></div>
+      <div class="hand second-hand" id="sec-hand"></div>
+      <div class="center-dot"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+  <script>
+  (function(){
+
+    // ---------- CONFIGURATION & FILTERS ----------
+    const PORTAL_FILTERS = {
+      thermal: { label: 'Thermal Vision', short: 'Thermal', icon: '🔥' },
+      liquid:  { label: 'Liquid Morph',   short: 'Liquid',  icon: '🌊' },
+      pixel:   { label: 'Pixel Matrix',   short: 'Pixel',   icon: '🟩' },
+      invert:  { label: 'Color Invert',   short: 'Invert',  icon: '🌀' },
+      cyber:   { label: 'CRT Glitch',     short: 'Glitch',  icon: '👾' }
+    };
+
+    const OBJECT_EFFECTS = {
+      particles: { label: 'Emoji Burst', short: 'Emoji',   icon: '✨', active: true },
+      bubbles:   { label: 'Bubbles',     short: 'Bubbles', icon: '🫧', active: true }
+    };
+
+    // MediaPipe Hand Bone Connections Map
+    const HAND_CONNECTIONS = [
+      [0,1],[1,2],[2,3],[3,4],       // Thumb
+      [0,5],[5,6],[6,7],[7,8],       // Index
+      [5,9],[9,10],[10,11],[11,12],   // Middle
+      [9,13],[13,14],[14,15],[15,16], // Ring
+      [13,17],[17,18],[18,19],[19,20],// Pinky
+      [0,17]                         // Palm Base
+    ];
+
+    // ---------- DOM & CANVAS SETUP ----------
+    const video = document.getElementById('webcam');
+    const canvas = document.getElementById('mainCanvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const gateScreen = document.getElementById('gateScreen');
+    const startBtn = document.getElementById('startBtn');
+    const errorBox = document.getElementById('errorBox');
+    const portalTag = document.getElementById('portalTag');
+    const hudMessage = document.getElementById('hudMessage');
+    const statusVal = document.getElementById('statusVal');
+    const hudDot = document.getElementById('hudDot');
+    const fpsVal = document.getElementById('fpsVal');
+    const handsVal = document.getElementById('handsVal');
+    const dockEl = document.getElementById('dock');
+
+    let activePortal = 'thermal';
+    let hands = null;
+    let stream = null;
+    let lastHandLandmarks = [];
+    let wobblyTime = 0;
+
+    // FPS tracking
+    let lastFrameTime = performance.now();
+    let frameCount = 0;
+
+    // Gesture state machine tracking
+    let pinchState = { 8: false, 12: false, 16: false, 20: false };
+
+    // ---------- DOCK BUILDER (filters + effect toggles) ----------
+    Object.keys(PORTAL_FILTERS).forEach(key => {
+      const f = PORTAL_FILTERS[key];
+      const btn = document.createElement('div');
+      btn.className = 'dock-btn' + (key === activePortal ? ' active' : '');
+      btn.dataset.portal = key;
+      btn.innerHTML = `<span class="dock-icon">${f.icon}</span><span class="dock-label">${f.short}</span>`;
+      btn.addEventListener('click', () => setPortalFilter(key));
+      dockEl.appendChild(btn);
+    });
+
+    const divider = document.createElement('div');
+    divider.className = 'dock-divider';
+    dockEl.appendChild(divider);
+
+    Object.keys(OBJECT_EFFECTS).forEach(key => {
+      const eff = OBJECT_EFFECTS[key];
+      const btn = document.createElement('div');
+      btn.className = 'dock-btn' + (eff.active ? ' active' : '');
+      btn.dataset.effect = key;
+      btn.innerHTML = `<span class="dock-icon">${eff.icon}</span><span class="dock-label">${eff.short}</span>`;
+      btn.addEventListener('click', () => {
+        eff.active = !eff.active;
+        btn.classList.toggle('active', eff.active);
+      });
+      dockEl.appendChild(btn);
+    });
+
+    function setPortalFilter(key) {
+      activePortal = key;
+      portalTag.textContent = `FILTER: ${PORTAL_FILTERS[key].label.toUpperCase()}`;
+      document.querySelectorAll('[data-portal]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.portal === key);
+      });
+    }
+    setPortalFilter(activePortal);
+
+    // ---------- CAMERA & INITIALIZATION ----------
+    startBtn.addEventListener('click', startCamera);
+
+    async function startCamera() {
+      errorBox.style.display = 'none';
+      startBtn.disabled = true;
+      startBtn.textContent = 'Connecting…';
+
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showError('Camera API is unavailable in this browser environment.');
+        return;
+      }
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } },
+          audio: false
+        });
+        video.srcObject = stream;
+
+        await new Promise(resolve => { video.onloadedmetadata = resolve; });
+        await video.play();
+
+        // Match the canvas's internal resolution to the real video feed so
+        // every drawImage() call and every normalized hand landmark lines up
+        // pixel-for-pixel. CSS object-fit:cover handles the responsive display.
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 960;
+
+        gateScreen.classList.add('hidden');
+        statusVal.textContent = 'ONLINE';
+        hudDot.classList.add('on');
+
+        initHandTracking();
+        requestAnimationFrame(renderLoop);
+      } catch (err) {
+        showError('Camera access denied or unavailable: ' + (err.message || err.name));
+      }
+    }
+
+    function showError(msg) {
+      startBtn.disabled = false;
+      startBtn.textContent = 'Enable Camera';
+      errorBox.style.display = 'block';
+      errorBox.textContent = msg;
+    }
+
+    function initHandTracking() {
+      if (typeof Hands === 'undefined') {
+        hudMessage.textContent = 'Hand tracking library failed to load. Check your connection.';
+        return;
+      }
+      try {
+        hands = new Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
+        });
+        hands.setOptions({
+          maxNumHands: 2,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.65,
+          minTrackingConfidence: 0.6
+        });
+        hands.onResults(onHandResults);
+        pumpHands();
+      } catch (e) {
+        console.error(e);
+        hudMessage.textContent = 'Tracking initialization error.';
+      }
+    }
+
+    let handsBusy = false;
+    async function pumpHands() {
+      if (video.readyState >= 2 && video.videoWidth > 0 && !handsBusy) {
+        handsBusy = true;
+        try { await hands.send({ image: video }); } catch (e) {}
+        handsBusy = false;
+      }
+      requestAnimationFrame(pumpHands);
+    }
+
+    // ---------- PARTICLE & FLOATING OBJECT ENGINE ----------
+    let particles = [];
+    let floatingBubbles = [];
+    const EMOJIS = ['✨', '💖', '🎈', '⭐', '⚡', '🌈', '🐱', '🔥', '🚀'];
+
+    function spawnEmojiBurst(x, y) {
+      for (let i = 0; i < 8; i++) {
+        particles.push({
+          x: x,
+          y: y,
+          vx: (Math.random() - 0.5) * 8,
+          vy: (Math.random() - 0.7) * 9,
+          size: 22 + Math.random() * 16,
+          emoji: EMOJIS[Math.floor(Math.random() * EMOJIS.length)],
+          life: 0,
+          maxLife: 45 + Math.random() * 25,
+          rotation: Math.random() * Math.PI,
+          vr: (Math.random() - 0.5) * 0.1
+        });
+      }
+    }
+
+    function spawnBubbleBurst(x, y) {
+      for (let i = 0; i < 10; i++) {
+        floatingBubbles.push({
+          x: x,
+          y: y,
+          vx: (Math.random() - 0.5) * 6,
+          vy: (Math.random() - 0.5) * 6,
+          radius: 8 + Math.random() * 14,
+          color: ['#00f3ff', '#ff007f', '#39ff14', '#ffd700', '#b026ff'][Math.floor(Math.random() * 5)],
+          life: 0,
+          maxLife: 60 + Math.random() * 40
+        });
+      }
+    }
+
+    function updateAndDrawObjects(w, h) {
+      // 1. Update & Render Emoji Particles
+      if (OBJECT_EFFECTS.particles.active) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+          let p = particles[i];
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.18; // Gravity
+          p.rotation += p.vr;
+          p.life++;
+
+          let alpha = 1 - (p.life / p.maxLife);
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, alpha);
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rotation);
+          ctx.font = `${p.size}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          // Un-mirror text drawing so emoji isn't reversed
+          ctx.scale(-1, 1);
+          ctx.fillText(p.emoji, 0, 0);
+          ctx.restore();
+
+          if (p.life >= p.maxLife) particles.splice(i, 1);
+        }
+      } else {
+        particles = [];
+      }
+
+      // 2. Update & Render Bouncing Bubbles
+      if (OBJECT_EFFECTS.bubbles.active) {
+        for (let i = floatingBubbles.length - 1; i >= 0; i--) {
+          let b = floatingBubbles[i];
+          b.x += b.vx;
+          b.y += b.vy;
+          b.life++;
+
+          // Fingertip Collisions (repel bubbles)
+          lastHandLandmarks.forEach(lm => {
+            [4, 8, 12, 16, 20].forEach(tip => {
+              let fx = lm[tip].x * w;
+              let fy = lm[tip].y * h;
+              let dx = b.x - fx;
+              let dy = b.y - fy;
+              let dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < b.radius + 30) {
+                b.vx += (dx / dist) * 2;
+                b.vy += (dy / dist) * 2;
+              }
+            });
+          });
+
+          let alpha = Math.sin((b.life / b.maxLife) * Math.PI);
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, alpha * 0.85);
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+          ctx.fillStyle = b.color;
+          ctx.shadowColor = b.color;
+          ctx.shadowBlur = 12;
+          ctx.fill();
+
+          // Inner bubble specular highlight
+          ctx.beginPath();
+          ctx.arc(b.x - b.radius * 0.3, b.y - b.radius * 0.3, b.radius * 0.3, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+          ctx.fill();
+          ctx.restore();
+
+          if (b.life >= b.maxLife) floatingBubbles.splice(i, 1);
+        }
+      } else {
+        floatingBubbles = [];
+      }
+    }
+
+    // ---------- GESTURE PROCESSING ----------
+    function dist(a, b) {
+      const dx = a.x - b.x, dy = a.y - b.y, dz = (a.z || 0) - (b.z || 0);
+      return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    function onHandResults(results) {
+      lastHandLandmarks = results.multiHandLandmarks || [];
+      handsVal.textContent = lastHandLandmarks.length;
+
+      if (!lastHandLandmarks.length) {
+        hudMessage.textContent = 'Hold up both hands to frame face with optical portal';
+        return;
+      }
+
+      const keys = Object.keys(PORTAL_FILTERS);
+
+      lastHandLandmarks.forEach(lm => {
+        const scale = dist(lm[0], lm[9]) || 0.001;
+        const thumb = lm[4];
+
+        // Check pinches for Index(8), Middle(12), Ring(16), Pinky(20)
+        [8, 12, 16, 20].forEach(tipIdx => {
+          const ratio = dist(thumb, lm[tipIdx]) / scale;
+          const isPinching = ratio < 0.45;
+          const px = lm[tipIdx].x * canvas.width;
+          const py = lm[tipIdx].y * canvas.height;
+
+          if (isPinching && !pinchState[tipIdx]) {
+            pinchState[tipIdx] = true;
+
+            if (tipIdx === 8) { // Index Pinch: Cycle Portal Filter
+              let currentIdx = keys.indexOf(activePortal);
+              let nextKey = keys[(currentIdx + 1) % keys.length];
+              setPortalFilter(nextKey);
+              hudMessage.textContent = `GESTURE: CHANGED FILTER TO ${PORTAL_FILTERS[nextKey].label.toUpperCase()}`;
+            } else if (tipIdx === 12) { // Middle Pinch: Trigger Wobbly Liquid
+              setPortalFilter('liquid');
+              hudMessage.textContent = 'GESTURE: WOBBLY MORPH MATRIX ACTIVATED';
+            } else if (tipIdx === 16) { // Ring Pinch: Emoji Burst
+              spawnEmojiBurst(px, py);
+              hudMessage.textContent = 'GESTURE: HAPPY EMOJI BURST!';
+            } else if (tipIdx === 20) { // Pinky Pinch: Bubble Burst
+              spawnBubbleBurst(px, py);
+              hudMessage.textContent = 'GESTURE: SPATIAL BUBBLES EMITTED!';
+            }
+          } else if (!isPinching && ratio > 0.55) {
+            pinchState[tipIdx] = false;
+          }
+        });
+      });
+    }
+
+    // ---------- SKELETON & HAND GRAPHICS (MATCHING IMAGE) ----------
+    function drawFullHandSkeleton(w, h) {
+      lastHandLandmarks.forEach((lm, handIndex) => {
+        // 1. Draw Hand Skeleton Bones (Green Cyber Lines like reference image)
+        ctx.strokeStyle = '#39ff14';
+        ctx.lineWidth = 2.5;
+        ctx.shadowColor = '#39ff14';
+        ctx.shadowBlur = 8;
+
+        HAND_CONNECTIONS.forEach(([i, j]) => {
+          const p1 = lm[i], p2 = lm[j];
+          ctx.beginPath();
+          ctx.moveTo(p1.x * w, p1.y * h);
+          ctx.lineTo(p2.x * w, p2.y * h);
+          ctx.stroke();
+        });
+        ctx.shadowBlur = 0;
+
+        // 2. Draw Joint Nodes (Red Dots like reference image)
+        lm.forEach((pt, idx) => {
+          const x = pt.x * w, y = pt.y * h;
+          ctx.beginPath();
+          ctx.arc(x, y, [4,8,12,16,20].includes(idx) ? 6 : 4, 0, Math.PI * 2);
+          ctx.fillStyle = [4,8,12,16,20].includes(idx) ? '#ff007f' : '#ff3333';
+          ctx.fill();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        });
+
+        // 3. Cybernetic Bounding Box & Telemetry around Hand
+        let minX = w, minY = h, maxX = 0, maxY = 0;
+        lm.forEach(pt => {
+          if (pt.x * w < minX) minX = pt.x * w;
+          if (pt.x * w > maxX) maxX = pt.x * w;
+          if (pt.y * h < minY) minY = pt.y * h;
+          if (pt.y * h > maxY) maxY = pt.y * h;
+        });
+
+        minX -= 15; minY -= 15; maxX += 15; maxY += 15;
+
+        ctx.strokeStyle = 'rgba(0, 243, 255, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 6]);
+        ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+        ctx.setLineDash([]);
+
+        // Corner Brackets
+        const len = 12;
+        ctx.strokeStyle = '#00f3ff';
+        ctx.lineWidth = 2;
+        // Top-Left
+        ctx.beginPath(); ctx.moveTo(minX, minY + len); ctx.lineTo(minX, minY); ctx.lineTo(minX + len, minY); ctx.stroke();
+        // Bottom-Right
+        ctx.beginPath(); ctx.moveTo(maxX, maxY - len); ctx.lineTo(maxX, maxY); ctx.lineTo(maxX - len, maxY); ctx.stroke();
+
+        // Hand Tag
+        ctx.save();
+        ctx.translate(minX, minY - 8);
+        ctx.scale(-1, 1); // Un-mirror telemetry text
+        ctx.font = '10px "Share Tech Mono", monospace';
+        ctx.fillStyle = '#00f3ff';
+        ctx.fillText(`HAND_${handIndex + 1} [TRACKING_OK]`, - (maxX - minX), 0);
+        ctx.restore();
+      });
+    }
+
+    // ---------- TWO-HAND FRAMED RECTANGLE PORTAL (IMAGE FEATURE) ----------
+    function drawFramedPortal(w, h) {
+      if (lastHandLandmarks.length < 2) return null;
+
+      // Identify Left Hand & Right Hand
+      const handA = lastHandLandmarks[0];
+      const handB = lastHandLandmarks[1];
+
+      // Determine left vs right in canvas space
+      let leftHand = handA[0].x < handB[0].x ? handA : handB;
+      let rightHand = handA[0].x >= handB[0].x ? handA : handB;
+
+      // Define 4 corner vertices for between-hand trapezoid frame (matching reference image)
+      const P0 = { x: leftHand[8].x * w,  y: leftHand[8].y * h };
+      const P1 = { x: rightHand[8].x * w, y: rightHand[8].y * h };
+      const P2 = { x: rightHand[4].x * w, y: rightHand[4].y * h };
+      const P3 = { x: leftHand[4].x * w,  y: leftHand[4].y * h };
+
+      // 1. Draw Holographic Wireframe Outline & 3D Depth Lines (White box like reference image)
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.shadowColor = '#00f3ff';
+      ctx.shadowBlur = 15;
+
+      ctx.beginPath();
+      ctx.moveTo(P0.x, P0.y);
+      ctx.lineTo(P1.x, P1.y);
+      ctx.lineTo(P2.x, P2.y);
+      ctx.lineTo(P3.x, P3.y);
+      ctx.closePath();
+      ctx.stroke();
+
+      // Secondary 3D Framed Projection Wireframe (Top extension line matching reference image)
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 1;
+      const topOffsetY = -40;
+      ctx.beginPath();
+      ctx.moveTo(P0.x, P0.y + topOffsetY);
+      ctx.lineTo(P1.x, P1.y + topOffsetY);
+      ctx.lineTo(P1.x, P1.y);
+      ctx.moveTo(P0.x, P0.y + topOffsetY);
+      ctx.lineTo(P0.x, P0.y);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+
+      return [P0, P1, P2, P3];
+    }
+
+    // ---------- PORTAL FILTER PIPELINE ----------
+    function renderPortalFilter(quadPoints, w, h) {
+      if (!quadPoints) return;
+
+      ctx.save();
+
+      // Create Polygon Clipping Mask for the Framed Region
+      ctx.beginPath();
+      ctx.moveTo(quadPoints[0].x, quadPoints[0].y);
+      ctx.lineTo(quadPoints[1].x, quadPoints[1].y);
+      ctx.lineTo(quadPoints[2].x, quadPoints[2].y);
+      ctx.lineTo(quadPoints[3].x, quadPoints[3].y);
+      ctx.closePath();
+      ctx.clip(); // Restrict all drawing strictly inside the framed rectangle!
+
+      // Apply Active Filter Effect inside Clip
+      switch(activePortal) {
+        case 'thermal': {
+          // High Contrast Thermal / Heatmap
+          ctx.filter = 'contrast(200%) saturate(300%) hue-rotate(180deg) invert(100%)';
+          ctx.drawImage(video, 0, 0, w, h);
+          ctx.filter = 'none';
+
+          // Add scanline overlay to thermal box
+          ctx.fillStyle = 'rgba(255, 0, 127, 0.15)';
+          ctx.fillRect(0, 0, w, h);
+          break;
+        }
+
+        case 'liquid': {
+          // Wobbly Physical Morphing Matrix Effect
+          wobblyTime += 0.08;
+          ctx.drawImage(video, 0, 0, w, h);
+
+          // Slice horizontal strips & displace them using sine waves for physical liquid morphing
+          const slices = 40;
+          const sliceH = h / slices;
+          for (let i = 0; i < slices; i++) {
+            let sy = i * sliceH;
+            let dx = Math.sin(i * 0.35 + wobblyTime) * 28;
+            let dy = Math.cos(i * 0.25 + wobblyTime) * 12;
+            ctx.drawImage(video, 0, sy, w, sliceH, dx, sy + dy, w, sliceH);
+          }
+          break;
+        }
+
+        case 'pixel': {
+          // Pixelated Grid Matrix
+          const pSize = 16;
+          const offCanvas = document.createElement('canvas');
+          offCanvas.width = Math.max(1, Math.floor(w / pSize));
+          offCanvas.height = Math.max(1, Math.floor(h / pSize));
+          const offCtx = offCanvas.getContext('2d');
+          offCtx.drawImage(video, 0, 0, offCanvas.width, offCanvas.height);
+
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(offCanvas, 0, 0, offCanvas.width, offCanvas.height, 0, 0, w, h);
+          ctx.imageSmoothingEnabled = true;
+
+          // Matrix Green Tint
+          ctx.fillStyle = 'rgba(57, 255, 20, 0.2)';
+          ctx.fillRect(0, 0, w, h);
+          break;
+        }
+
+        case 'invert': {
+          ctx.filter = 'invert(100%) hue-rotate(90deg) contrast(150%)';
+          ctx.drawImage(video, 0, 0, w, h);
+          ctx.filter = 'none';
+          break;
+        }
+
+        case 'cyber': {
+          // CRT Chromatic Aberration RGB Shift
+          ctx.drawImage(video, -6, 0, w, h);
+          ctx.globalCompositeOperation = 'screen';
+          ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
+          ctx.fillRect(0, 0, w, h);
+          ctx.drawImage(video, 6, 0, w, h);
+          ctx.globalCompositeOperation = 'source-over';
+          break;
+        }
+      }
+
+      ctx.restore();
+    }
+
+    // ---------- MAIN RENDER LOOP ----------
+    // NOTE: this function was referenced (requestAnimationFrame(renderLoop))
+    // but never defined in the original file, which is the main reason the
+    // camera feed and every filter never appeared.
+    function renderLoop() {
+      const w = canvas.width, h = canvas.height;
+
+      if (w && h) {
+        // FPS tracking
+        frameCount++;
+        const now = performance.now();
+        if (now - lastFrameTime >= 1000) {
+          fpsVal.textContent = frameCount;
+          frameCount = 0;
+          lastFrameTime = now;
+        }
+
+        ctx.save();
+        ctx.clearRect(0, 0, w, h);
+        // Mirror horizontally so it behaves like a selfie camera
+        ctx.translate(w, 0);
+        ctx.scale(-1, 1);
+
+        // Base camera feed
+        ctx.drawImage(video, 0, 0, w, h);
+
+        // Hand skeleton overlay
+        if (lastHandLandmarks.length) {
+          drawFullHandSkeleton(w, h);
+        }
+
+        // Two-hand framed portal + active filter
+        if (lastHandLandmarks.length >= 2) {
+          const quad = drawFramedPortal(w, h);
+          renderPortalFilter(quad, w, h);
+        }
+
+        // Particles / bubbles
+        updateAndDrawObjects(w, h);
+
+        ctx.restore();
+      }
+
+      requestAnimationFrame(renderLoop);
+    }
+
+  })();
+  </script>
+</body>
+</html>
